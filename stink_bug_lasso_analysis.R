@@ -3,15 +3,10 @@
 # Preliminaries
 rm(list = ls())
 my.packages <- c("lattice", "tidyr", "ggplot2",  
-                 "dplyr", "glmnet", "piecewiseSEM")
+                 "dplyr", "glmnet")
 lapply(my.packages, require, character.only = TRUE)
-# Note: using the sem.model.fits() function from the piecewiseSEM package to get R-squared for
-# LMMs, which is based on the publication:
-# Nakagawa, S., and H. Schielzeth. 2013. A general and simple method for obtaining R2 from generalized 
-# linear mixed-effects models. Methods in Ecology and Evolution 4(2): 133-142. 
-# DOI: 10.1111/j.2041-210x.2012.00261.x
 
-setwd("C:/Users/Adam/Documents/Dawns stink bug reproduction ms/Multiple regression")
+source("lasso_functions.R")
 
 #### Brown stink bug reproduction data set
 #### Explanatory variables can be grouped into three general categories:
@@ -82,23 +77,38 @@ datalasso <- bsdata[,c("lnlambda", "region", "gv", "pa", "ne", "mgeo", "mant",
 # Remove NAs
 badRows.i <- unlist(sapply(1:ncol(datalasso), function(x) which(is.na(datalasso[,x])), simplify = TRUE))
 explVars <- datalasso[-badRows.i,]
-# Make matrix of explanatory variables
+
+# Make matrix of standardized covariates
+# Standardize continuous covariates
+ccovars <- c("gv", "pa", "ne", "mgeo", "mant", 
+             "pmaize", "pcot", "ppea", "psoy", "pcrop",
+             "mdistcorn", "mdistcot", "mdistpea", "mdistsoy", "mdistall",
+             "pedge")
+ccovars.i <- as.numeric(sapply(ccovars, function(x) which(names(explVars) == x), simplify = TRUE))
+# Replace covariates with standardized form
+for(i in ccovars.i){
+  var.i <- names(explVars)[i]
+  stdvar.i <- standardize(explVars[,var.i])
+  explVars[,var.i] <- stdvar.i
+}
+# Make as a matrix
 xlasso <- as.matrix(explVars[,-1])
+
+
+# Vector of response variable
 ylasso <- explVars$lnlambda
+
 
 
 ######################################################################################
 #### Elastic net LASSO
 #### When alpha = 1, glmnet runs a lasso penalty; when 0 < alpha < 1, it uses the elastic net lasso penalty
-#### To cross-validate alpha, run cv.glmnet over a range of alpha
-# Function to loop through alpha values
-lassoAlphaCV <- function(x){
-  lassoCVmin <- cv.glmnet(y = ylasso, x = xlasso, family = "gaussian", alpha = x)$lambda.min
-  return(c(x, lassoCVmin))
-}
+#### To cross-validate alpha, run cv.glmnet over a range of alpha, using lassoAlphaCV function
 times <- 2000
-alphaVec <- rep(seq(0.9,1,by=0.01),times) # sequence of alpha values
+alphaVec <- rep(seq(0.8,1,by=0.01),times) # sequence of alpha values
+
 alphaCVResults <- as.data.frame(t(sapply(alphaVec, lassoAlphaCV, simplify = TRUE))) # run through alpha values
+
 names(alphaCVResults) <- c("alpha", "lambda.min")
 plot(x = alphaCVResults$alpha, y = jitter(alphaCVResults$lambda.min))
 ## summary of alpha values
