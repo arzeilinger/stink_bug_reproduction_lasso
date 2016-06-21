@@ -125,6 +125,9 @@ alphaBest <- as.numeric(alphaSummary[alphaSummary$median == min(alphaSummary$med
 lambdaBest <- as.numeric(min(alphaSummary$median))
 lambdas <- alphaCVResults[alphaCVResults$alpha == alphaBest,"lambda.min"]
 
+# Summary of best lambdas at best alpha value
+summary(lambdas)
+
 #### Get model coefficients for every value of lambda at best alpha
 bsElasticNet <- glmnet(y = ylasso, x = xlasso, family = "gaussian", alpha = alphaBest)
 # glmnet for best alpha and lambda
