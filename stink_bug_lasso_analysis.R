@@ -31,10 +31,13 @@ source("lasso_functions.R")
 # mant = mean no. of fire ants
 
 # Import data set
-bsdata <- read.csv("Brown_lambda_multi-regression.csv", header = TRUE)
+bsdata <- read.csv("data/Brown_lambda_multi-regression.csv", header = TRUE)
 
 # make a new variable for total proportion of crop area
 bsdata$pcrop <- with(bsdata, pmaize + pcot + ppea + psoy)
+
+# Make region a 0/1 binary variable
+bsdata$region <- bsdata$region - 1
 
 # Crop factor codes
 bsdata$crop <- factor(ifelse(bsdata$crop == 1, "maize", 
@@ -69,7 +72,7 @@ str(bsdata)
 datalasso <- bsdata[,c("lnlambda", "region", "gv", "pa", "ne", "mgeo", "mant", 
                     "pmaize", "pcot", "ppea", "psoy", "pcrop",
                     "mdistcorn", "mdistcot", "mdistpea", "mdistsoy", "mdistall",
-                    "pedge", "cropmaize", "cropcotton", "croppeanut", "cropsoybean",
+                    "cropmaize", "cropcotton", "croppeanut", "cropsoybean",
                     "year2009", "year2010", "year2011")]
 # Need only numeric variables for cv.glmnet
 # datalasso$region <- as.numeric(levels(datalasso$region))[datalasso$region]
@@ -82,8 +85,7 @@ explVars <- datalasso[-badRows.i,]
 # Standardize continuous covariates
 ccovars <- c("gv", "pa", "ne", "mgeo", "mant", 
              "pmaize", "pcot", "ppea", "psoy", "pcrop",
-             "mdistcorn", "mdistcot", "mdistpea", "mdistsoy", "mdistall",
-             "pedge")
+             "mdistcorn", "mdistcot", "mdistpea", "mdistsoy", "mdistall")
 ccovars.i <- as.numeric(sapply(ccovars, function(x) which(names(explVars) == x), simplify = TRUE))
 # Replace covariates with standardized form
 for(i in ccovars.i){
@@ -91,70 +93,48 @@ for(i in ccovars.i){
   stdvar.i <- standardize(explVars[,var.i])
   explVars[,var.i] <- stdvar.i
 }
-# Make as a matrix
-xlasso <- as.matrix(explVars[,-1])
 
 
-# Vector of response variable
-ylasso <- explVars$lnlambda
+# # Set of histograms for standardized covariates
+# niceNames <- c("proportion green veining", "perimeter to area ratio", "mean predators", "mean geocoris",
+#                "mean fire ants", "proportion maize", "proportion cotton", "proportion peanut", "proportion soybean",
+#                "proportion total crops", "distance to maize", "distance to cotton", "distance to peanut", "distance to soybean",
+#                "distance to all crops")
+# for(i in 1:length(ccovars)){
+#   covar.i <- ccovars[i]
+#   fileName <- paste("figures/histogram_", covar.i, ".tif", sep="")
+#   print(fileName)
+#   tiff(file = fileName)
+#     hist(explVars[,covar.i], xlab = niceNames[i], main = niceNames[i])
+#   dev.off()
+# }
 
 
 
 ######################################################################################
-#### Elastic net LASSO
-#### When alpha = 1, glmnet runs a lasso penalty; when 0 < alpha < 1, it uses the elastic net lasso penalty
-#### To cross-validate alpha, run cv.glmnet over a range of alpha, using lassoAlphaCV function
-times <- 2000
-alphaVec <- rep(seq(0.8,1,by=0.01),times) # sequence of alpha values
-
-alphaCVResults <- as.data.frame(t(sapply(alphaVec, lassoAlphaCV, simplify = TRUE))) # run through alpha values
-
-names(alphaCVResults) <- c("alpha", "lambda.min")
-plot(x = alphaCVResults$alpha, y = jitter(alphaCVResults$lambda.min))
-## summary of alpha values
-alphaSummary <- alphaCVResults %>% group_by(alpha) %>% summarise(mean = mean(lambda.min), 
-                                                                 median = median(lambda.min),
-                                                                 sd = sd(lambda.min))
-pdf("alpha-lambda cross-validation plot median.pdf")
-  plot(x = alphaSummary$alpha, y = alphaSummary$median, type = "b")
-dev.off()
-alphaSummary[alphaSummary$median == min(alphaSummary$median),]
-write.csv(as.data.frame(alphaSummary), file = "alpha-lambda cross-validation.csv", row.names = FALSE)
-#### Extract lambda.min values from all runs at best alpha
-alphaBest <- as.numeric(alphaSummary[alphaSummary$median == min(alphaSummary$median),"alpha"])
-lambdaBest <- as.numeric(min(alphaSummary$median))
-lambdas <- alphaCVResults[alphaCVResults$alpha == alphaBest,"lambda.min"]
-
-# Summary of best lambdas at best alpha value
-summary(lambdas)
-
-#### Get model coefficients for every value of lambda at best alpha
-bsElasticNet <- glmnet(y = ylasso, x = xlasso, family = "gaussian", alpha = alphaBest)
-# glmnet for best alpha and lambda
-coef(bsElasticNet, s = lambdaBest)
-# Combine coefficients into a matrix and get mean coefficient for each term
-bscoefResults <- matrix(0, nrow = ncol(xlasso)+1, ncol = length(lambdas))
-for(i in 1:length(lambdas)){
-  lambda.i <- lambdas[i]
-  bscoefResults[,i] <- as.numeric(coef(bsElasticNet, s = lambda.i))
-}
-# Mean coefficient estimates
-bscoefMeans <- data.frame(param = row.names(coef(bsElasticNet)),
-                          estimate = rowMeans(bscoefResults),
-                          sd = apply(bscoefResults, 1, sd))
-write.csv(bscoefMeans, file = "elastic_net_mean_model_coef.csv", row.names = FALSE)
-
-# Which terms are estimated at zero (dropped from the model) at least once
-is.zero <- sapply(1:nrow(bscoefResults), function(x) any(bscoefResults[x,] == 0), simplify = TRUE) %>%
-  which() %>% row.names(coef(bsElasticNet))[.]
-selectedParams <- bscoefMeans[bscoefMeans$estimate != 0, "param"]
-sometimes.zero <- selectedParams[which(selectedParams %in% is.zero)]
+#### Elastic Net LASSO for stink bug lambda estimates
+print("Stink Bug Lambda")
+sb <- ElasticNetFunction(y = "lnlambda", times = 2000,
+                         data = explVars,
+                         alphaValues = seq(0.8,1,by=0.01))
+rm(xlasso)
+rm(ylasso)
 
 
-#### Ridge regression
-cvRidge <- cv.glmnet(y = ylasso, x = xlasso, family = "gaussian", alpha = 0)
-lambdaRidge <- cvRidge$lambda.min
-bsRidge <- glmnet(y = ylasso, x = xlasso, family = "gaussian", alpha = 0)
-coef(bsRidge, s = lambdaRidge)
+######################################################################################
+#### LASSO for Geocoris and fire ant densities
+#### remove natural enemy densities as is likely correlated with these variables
+print("Geocoris density")
+geocoris <- ElasticNetFunction(y = "mgeo", times = 2000, 
+                               data = explVars[,-which(names(explVars) == "ne")], 
+                               alphaValues = seq(0.8,1,by=0.01))
+rm(xlasso)
+rm(ylasso)
 
 
+######################################################################################
+#### Elastic Net LASSO for stink bug lambda estimates
+print("Fire ant density")
+fireant <- ElasticNetFunction(y = "mant", times = 2000,
+                              data = explVars[,-which(names(explVars) == "ne")],
+                              alphaValues = seq(0.8,1,by=0.01))
