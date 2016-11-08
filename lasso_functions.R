@@ -16,7 +16,8 @@ lassoAlphaCV <- function(x){
 }
 
 
-#### Function to run elastic net multiple times for a given response variable
+#### Function to run elastic net cross-validation (ENCV) multiple times for a given response variable
+#### To get a distribution of the best alpha and corresponding estimates of lambda
 #### Inputs are:
 # data = data set; should be left as explVars
 # y = response variable name
@@ -25,8 +26,8 @@ lassoAlphaCV <- function(x){
 #### Need to make a folder/directory with the name of the response variable before hand
 #### Future version should make directory automatically
 
-ElasticNetFunction <- function(y = "lnlambda", times = 2000, data = explVars, alphaValues = seq(0.8,1,by=0.01)){
-  #data <- explVars
+encv <- function(y = "lnlambda", times = 2000, data = explVars, alphaValues = seq(0.8,1,by=0.01)){
+  #### Get data structured correctly to submit for cross-validation
   # Vector of response variable
   ylasso <- data[,y]
   assign("ylasso", ylasso, envir = .GlobalEnv)
@@ -36,7 +37,7 @@ ElasticNetFunction <- function(y = "lnlambda", times = 2000, data = explVars, al
   # Output directory
   outdir <- paste("output/", y, "/", sep = "")
   ######################################################################################
-  #### Elastic net LASSO
+  #### Elastic Net Cross-validation
   #### When alpha = 1, glmnet runs a lasso penalty; when 0 < alpha < 1, it uses the elastic net lasso penalty
   #### To cross-validate alpha, run cv.glmnet over a range of alpha, using lassoAlphaCV function
   alphaVec <- rep(alphaValues,times) # sequence of alpha values
@@ -57,26 +58,58 @@ ElasticNetFunction <- function(y = "lnlambda", times = 2000, data = explVars, al
   alphaBest <- as.numeric(alphaSummary[alphaSummary$median == min(alphaSummary$median),"alpha"])
   lambdaBest <- as.numeric(min(alphaSummary$median))
   lambdas <- alphaCVResults[alphaCVResults$alpha == alphaBest,"lambda.min"]
+  cvlist <- list(alphaCVResults = alphaCVResults,
+                 alphaBest = alphaBest,
+                 lambdaBest = lambdaBest,
+                 # Summary of lambda values at best alpha
+                 alphaSummary = alphaSummary[alphaSummary$median == min(alphaSummary$median),],
+                 # Vector of lambda values at best alpha value
+                 lambdas = lambdas)
+  return(cvlist)
+} 
+
+
+########################################################################################
+#### Function to run elastic net analysis for each combination alpha and lambda, estimated from cross-validation
+
+ElasticNetFunction <- function(y = "lnlambda", data = explVars, alphaBest = alphaBest, lambdas = lambdas){
+  #### Get data structured correctly to submit for cross-validation
+  # Vector of response variable
+  ylasso <- data[,y]
+  assign("ylasso", ylasso, envir = .GlobalEnv)
+  # Make covariate data as a matrix
+  xlasso <- as.matrix(data[,-which(names(data) == y)])
+  assign("xlasso", xlasso, envir = .GlobalEnv)
+  # Output directory
+  outdir <- paste("output/", y, "/", sep = "")
   #### Get model coefficients for every value of lambda at best alpha
-  bsElasticNet <- glmnet(y = ylasso, x = xlasso, family = "gaussian", alpha = alphaBest)
+  bsElasticNet <- glmnet(y = ylasso, x = xlasso, family = "gaussian", alpha = alphaBest, standardize = FALSE)
   # glmnet for best alpha and lambda
   #coef(bsElasticNet, s = lambdaBest)
   # Combine coefficients into a matrix and get mean coefficient for each term
-  bscoefResults <- matrix(0, nrow = ncol(xlasso)+1, ncol = length(lambdas))
+  coefResults <- matrix(NA, nrow = ncol(xlasso)+1, ncol = length(lambdas))
+  enPredict <- enResiduals <- matrix(NA, nrow = nrow(xlasso), ncol = length(lambdas))
   for(i in 1:length(lambdas)){
     lambda.i <- lambdas[i]
-    bscoefResults[,i] <- as.numeric(coef(bsElasticNet, s = lambda.i))
+    coefResults[,i] <- as.numeric(coef(bsElasticNet, s = lambda.i))
+    enPredict[,i] <- predict(bsElasticNet, s = lambda.i, newx = xlasso, type = "link")
+    enResiduals[,i] <- ylasso - enPredict[,i]
   }
   # Mean coefficient estimates
-  bscoefMeans <- data.frame(param = row.names(coef(bsElasticNet)),
-                            estimate = signif(rowMeans(bscoefResults), digits = 3),
-                            sd = signif(apply(bscoefResults, 1, sd), digits = 3))
-  write.csv(bscoefMeans, file = paste(outdir,"elastic_net_mean_model_coef.csv", sep=""), row.names = FALSE)
-  enlist <- list(alphaBest = alphaBest,
-                 lambdaBest = lambdaBest,
-                 alphaSummary = alphaSummary[alphaSummary$median == min(alphaSummary$median),],
-                 # Summary of best lambdas at best alpha value
-                 lambdaSummary = summary(lambdas))
-  print(enlist)
+  coefMeans <- data.frame(param = row.names(coef(bsElasticNet)),
+                          estimate = signif(rowMeans(coefResults), digits = 3),
+                          sd = signif(apply(coefResults, 1, sd), digits = 3))
+  write.csv(coefMeans, file = paste(outdir,"elastic_net_mean_model_coef.csv", sep=""), row.names = FALSE)
+  # Mean residuals
+  residMeans <- data.frame(mean = signif(rowMeans(enResiduals), digits = 3),
+                           sd = signif(apply(enResiduals, 1, sd), digits = 3))
+  write.csv(residMeans, file = paste(outdir,"elastic_net_mean_residuals.csv", sep=""), row.names = FALSE)
+  enlist <- list(ylasso = ylasso,
+                 xlasso = xlasso,
+                 coefResults = coefResults,
+                 enPredict = enPredict,
+                 enResiduals = enResiduals,
+                 coefMeans = coefMeans,
+                 residMeans = residMeans)
   return(enlist)
-} 
+}

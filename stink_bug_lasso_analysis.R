@@ -81,11 +81,16 @@ datalasso <- bsdata[,c("lnlambda", "region", "gv", "pa", "ne", "mgeo", "mant",
 badRows.i <- unlist(sapply(1:ncol(datalasso), function(x) which(is.na(datalasso[,x])), simplify = TRUE))
 explVars <- datalasso[-badRows.i,]
 
+# log transform mant and mgeo as they're highly skewed
+explVars$lnmgeo <- log(explVars$mgeo + 1)
+explVars$lnmant <- log(explVars$mant + 1)
+
 # Make matrix of standardized covariates
 # Standardize continuous covariates
-ccovars <- c("gv", "pa", "ne", "mgeo", "mant", 
+ccovars <- c("lnlambda", "gv", "pa", "ne", "mgeo", "mant", 
              "pmaize", "pcot", "ppea", "psoy", "pcrop",
-             "mdistcorn", "mdistcot", "mdistpea", "mdistsoy", "mdistall")
+             "mdistcorn", "mdistcot", "mdistpea", "mdistsoy", "mdistall",
+             "lnmgeo", "lnmant")
 ccovars.i <- as.numeric(sapply(ccovars, function(x) which(names(explVars) == x), simplify = TRUE))
 # Replace covariates with standardized form
 for(i in ccovars.i){
@@ -115,7 +120,7 @@ for(i in ccovars.i){
 #### Elastic Net LASSO for stink bug lambda estimates
 print("Stink Bug Lambda")
 sb <- ElasticNetFunction(y = "lnlambda", times = 2000,
-                         data = explVars,
+                         data = explVars[,-which(names(explVars) == c("lnmgeo", "lnmant"))],
                          alphaValues = seq(0.8,1,by=0.01))
 rm(xlasso)
 rm(ylasso)
@@ -125,16 +130,65 @@ rm(ylasso)
 #### LASSO for Geocoris and fire ant densities
 #### remove natural enemy densities as is likely correlated with these variables
 print("Geocoris density")
-geocoris <- ElasticNetFunction(y = "mgeo", times = 2000, 
-                               data = explVars[,-which(names(explVars) == "ne")], 
-                               alphaValues = seq(0.8,1,by=0.01))
+
+geoVars <- select(explVars, -mgeo, -ne, -lnmant)
+
+#### Cross-validation for geocoris
+geocorisCV <- encv(y = "lnmgeo", times = 2000, 
+                 data = geoVars, 
+                 alphaValues = seq(0.90,1,by=0.01))
 rm(xlasso)
 rm(ylasso)
+
+saveRDS(geocorisCV, file = "output/lnmgeo/geocoris_cross-validation_output.rds")
+
+
+#### Elasitc Net results and residuals for geocoris
+geocorisEN <- ElasticNetFunction(y = "lnmgeo", data = geoVars, 
+                                 alphaBest = geocorisCV$alphaBest, 
+                                 lambdas = geocorisCV$lambdas)
+saveRDS(geocorisEN, file = "output/lnmgeo/geocoris_elastic_net_output.rds")
+
+explVars$geoResiduals <- geocorisEN$residMeans$mean
+explVars$geoResidualsSD <- geocorisEN$residMeans$sd
+write.csv(explVars, file = "output/lnmgeo/lambda_data_with_residuals.csv", row.names = FALSE)
+
+# Checking the residuals
+geoResiduals <- geocorisEN$residMeans$mean
+geoPredict <- rowMeans(geocorisEN$enPredict)
+plot(geoPredict, geoResiduals)
+
+plot(ylasso, geoPredict, xlim = c(-2,5), ylim = c(-2,5))
+abline(a = 0, b =1)
 
 
 ######################################################################################
 #### Elastic Net LASSO for stink bug lambda estimates
 print("Fire ant density")
-fireant <- ElasticNetFunction(y = "mant", times = 2000,
-                              data = explVars[,-which(names(explVars) == "ne")],
-                              alphaValues = seq(0.8,1,by=0.01))
+
+antVars <- select(explVars, -lnmgeo, -ne, -mant)
+
+rm(xlasso)
+rm(ylasso)
+
+#### Cross-validation for fire ant density
+antCV <- encv(y = "lnmant", times = 2000, 
+              data = antVars, 
+              alphaValues = seq(0.8,1,by=0.01))
+
+saveRDS(antCV, file = "output/lnmant/ant_cross-validation_output.rds")
+
+
+#### Elasitc Net results and residuals for fire ant density
+antEN <- ElasticNetFunction(y = "lnmant", data = antVars, 
+                                 alphaBest = antCV$alphaBest, 
+                                 lambdas = antCV$lambdas)
+saveRDS(antEN, file = "output/lnmant/ant_elastic_net_output.rds")
+
+
+#########################################################################################
+
+
+
+
+
