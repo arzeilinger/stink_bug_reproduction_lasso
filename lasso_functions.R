@@ -83,7 +83,7 @@ ElasticNetFunction <- function(y = "lnlambda", data = explVars, alphaBest = alph
   # Output directory
   outdir <- paste("output/", y, "/", sep = "")
   #### Get model coefficients for every value of lambda at best alpha
-  bsElasticNet <- glmnet(y = ylasso, x = xlasso, family = "gaussian", alpha = alphaBest, standardize = FALSE)
+  bsElasticNet <- glmnet(y = ylasso, x = xlasso, family = "gaussian", alpha = alphaBest, standardize = TRUE)
   # glmnet for best alpha and lambda
   #coef(bsElasticNet, s = lambdaBest)
   # Combine coefficients into a matrix and get mean coefficient for each term
