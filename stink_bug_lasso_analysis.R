@@ -92,12 +92,17 @@ datalasso <- bsdata %>% dplyr::select(., lnlambda, gv, pa, lngeo, lnant, lnne,
                     starts_with("ndist"), # Selects for 15 variables -- each crop and all crops at 100, 500, and 1000 m distances
                     cropmaize, cropcotton, croppeanut, cropsoybean,
                     year2009, year2010, year2011)
+
+#### Splitting analysis into two LASSOs -- one for ndist variables and one for everything else
+ndistData <- datalasso %>% dplyr::select(., lnlambda, starts_with("ndist"))
+fieldData <- datalasso %>% dplyr::select(., -starts_with("ndist"))
+
 # Need only numeric variables for cv.glmnet
 # datalasso$region <- as.numeric(levels(datalasso$region))[datalasso$region]
 # datalasso$crop <- as.numeric(levels(datalasso$crop))[datalasso$crop]
 # Remove NAs
-goodRows <- datalasso %>% complete.cases() %>% which()
-explVars <- datalasso[goodRows,]
+ndistData <- ndistData %>% dplyr::filter(., complete.cases(.)) 
+fieldData <- fieldData %>% dplyr::filter(., complete.cases(.))
 
 # Don't need to standardize before hand, just use glmnet's standardize option
 # # Make matrix of standardized covariates
@@ -129,44 +134,87 @@ explVars <- datalasso[goodRows,]
 #   dev.off()
 # }
 
-explVars$ndist100m_all <- factor2numeric(explVars$ndist100m_all)
-explVars$ndist500all <- factor2numeric(explVars$ndist500all)
-str(explVars)
 
 ######################################################################################
 #### Elastic Net LASSO for stink bug lambda estimates
-print("Stink Bug Lambda")
+
+alphaValues <- c(seq(0, 0.9, by=0.1), seq(0.92, 1, by=0.02))
+
+#### Analysis of ndist variables
+ndistData$ndist100m_all <- factor2numeric(ndistData$ndist100m_all)
+ndistData$ndist500all <- factor2numeric(ndistData$ndist500all)
+str(ndistData)
 
 ti <- Sys.time()
-sbcv <- encv(y = "lnlambda", times = 2000,
-             data = explVars,
-             alphaValues = seq(0.9, 1, by = 0.02))
-saveRDS(sbcv, file = "output/lnlambda/stink_bug_lnlambda_cross-validation_output.rds")
+ndistcv <- encv(y = "lnlambda", times = 2000,
+             data = ndistData,
+             alphaValues = alphaValues)
+saveRDS(ndistcv, file = "output/lnlambda/stink_bug_lnlambda_ndist_cross-validation_output.rds")
 tf <- Sys.time()
 
 # Time took for cross-validation 
 tf-ti
 
 
-sben <- ElasticNetFunction(y = "lnlambda", data = explVars, 
-                           alphaBest = sbcv$alphaBest, 
-                           lambdas = sbcv$lambdas)
-saveRDS(sben, file = "output/lnlambda/stink_bug_lnlambda_elastic_net_output.rds")
+ndisten <- ElasticNetFunction(y = "lnlambda", data = ndistData, 
+                           alphaBest = ndistcv$alphaBest, 
+                           lambdas = ndistcv$lambdas)
+saveRDS(ndisten, file = "output/lnlambda/stink_bug_lnlambda_ndist_elastic_net_output.rds")
 
-sben$coefMeans
+ndisten$coefMeans
 
-sbcv <- readRDS("output/lnlambda/stink_bug_lnlambda_cross-validation_output.rds")
-sben <- readRDS("output/lnlambda/stink_bug_lnlambda_elastic_net_output.rds")
+# ndistcv <- readRDS("output/lnlambda/stink_bug_lnlambda_ndist_cross-validation_output.rds")
+# ndisten <- readRDS("output/lnlambda/stink_bug_lnlambda_ndist_elastic_net_output.rds")
 
 #### LASSO significance test with lars and covTest
 
-xsb <- sben$xlasso
-ysb <- sben$ylasso
+xsb <- ndisten$xlasso
+ysb <- ndisten$ylasso
 
-sbTest <- larsLASSOFunction(y = ysb, x = xsb)
+ndistTest <- larsLASSOFunction(y = ysb, x = xsb)
 
 # Combine all results, from glmnet and lars
-sbResults <- full_join(sben$coefMeans, sbTest, by = "param")
-write.csv(sbResults, file = "output/stink_bug_lambda_lasso_results.csv", row.names = FALSE)
+sbResults <- full_join(ndisten$coefMeans, sbTest, by = "param")
+write.csv(sbResults, file = "output/stink_bug_lambda_ndist_lasso_results.csv", row.names = FALSE)
+
+sbResults
+
+
+################################################################################################################
+#### Analysis of all non-ndist variables
+
+str(fieldData)
+
+ti <- Sys.time()
+fieldcv <- encv(y = "lnlambda", times = 2000,
+                data = fieldData,
+                alphaValues = alphaValues)
+saveRDS(fieldcv, file = "output/lnlambda/stink_bug_lnlambda_field_cross-validation_output.rds")
+tf <- Sys.time()
+
+# Time took for cross-validation 
+tf-ti
+
+
+fielden <- ElasticNetFunction(y = "lnlambda", data = fieldData, 
+                              alphaBest = fieldcv$alphaBest, 
+                              lambdas = fieldcv$lambdas)
+saveRDS(fielden, file = "output/lnlambda/stink_bug_lnlambda_field_elastic_net_output.rds")
+
+fielden$coefMeans
+
+# fieldcv <- readRDS("output/lnlambda/stink_bug_lnlambda_field_cross-validation_output.rds.rds")
+# fielden <- readRDS("output/lnlambda/stink_bug_lnlambda_field_elastic_net_output.rds")
+
+#### LASSO significance test with lars and covTest
+
+xsb <- fielden$xlasso
+ysb <- fielden$ylasso
+
+fieldTest <- larsLASSOFunction(y = ysb, x = xsb)
+
+# Combine all results, from glmnet and lars
+sbResults <- full_join(fielden$coefMeans, sbTest, by = "param")
+write.csv(sbResults, file = "output/stink_bug_lambda_field_lasso_results.csv", row.names = FALSE)
 
 sbResults
