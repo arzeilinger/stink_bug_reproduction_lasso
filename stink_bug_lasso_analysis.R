@@ -3,10 +3,11 @@
 # Preliminaries
 rm(list = ls())
 my.packages <- c("lattice", "tidyr", "ggplot2",  
-                 "dplyr", "glmnet")
+                 "dplyr", "glmnet", "lars", "covTest")
 lapply(my.packages, require, character.only = TRUE)
 
 source("lasso_functions.R")
+source("functions_lars.R")
 
 #### Brown stink bug reproduction data set
 #### Explanatory variables can be grouped into three general categories:
@@ -31,10 +32,20 @@ source("lasso_functions.R")
 # mant = mean no. of fire ants
 
 # Import data set
-bsdata <- read.csv("data/Brown_lambda_multi-regression.csv", header = TRUE)
+bsdata <- read.csv("data/Brown_lambda_lasso_data.csv", header = TRUE)
 
-# make a new variable for total proportion of crop area
-bsdata$pcrop <- with(bsdata, pmaize + pcot + ppea + psoy)
+# # For combining data sets when Dawn's updates ndist data
+# bsdata <- bsdata %>% dplyr::select(., -starts_with("ndist")) %>% unite(., col = uniqueField, year:field, remove = FALSE)
+# n_distinct(bsdata$uniqueField)
+# ndistdata <- read.csv("data/Brown_lambda_lasso_data_ndist.csv")
+# ndistdata <- ndistdata %>% unite(., col = uniqueField, year:field, remove = TRUE)
+# bsdata2 <- full_join(bsdata, ndistdata, by = "uniqueField")
+# bsdata <- bsdata2
+# summary(bsdata)
+# write.csv(bsdata, file = "data/Brown_lambda_lasso_data.csv", row.names = FALSE)
+
+# # make a new variable for total proportion of crop area
+# bsdata$pcrop <- with(bsdata, pmaize + pcot + ppea + psoy)
 
 # Make region a 0/1 binary variable
 bsdata$region <- bsdata$region - 1
@@ -63,41 +74,45 @@ for(i in levels(bsdata$year)){
   bsdata[,yearname.i] <- ifelse(bsdata$year == year.i, 1, 0)
 }
 
-str(bsdata)
+# log transform mant and mgeo as they're highly skewed
+bsdata$lngeo <- log(bsdata$geo + 1)
+bsdata$lnant <- log(bsdata$ant + 1)
+bsdata$lnne <- log(bsdata$ne + 1)
+
+#bsdata$lnlambda <- factor2numeric(bsdata$lnlambda)
+
+summary(bsdata)
 
 ##########################################################################################
 #### Variable selection using LASSO
 # For predictor variables, I'm including year and crop as binary dummy variables 
 # Preparing data
-datalasso <- bsdata[,c("lnlambda", "region", "gv", "pa", "ne", "mgeo", "mant", 
-                    "pmaize", "pcot", "ppea", "psoy", "pcrop",
-                    "mdistcorn", "mdistcot", "mdistpea", "mdistsoy", "mdistall",
-                    "cropmaize", "cropcotton", "croppeanut", "cropsoybean",
-                    "year2009", "year2010", "year2011")]
+datalasso <- bsdata %>% dplyr::select(., lnlambda, gv, pa, lngeo, lnant, lnne,
+                    pmaize, pcot, ppea, psoy, pall,
+                    starts_with("ndist"), # Selects for 15 variables -- each crop and all crops at 100, 500, and 1000 m distances
+                    cropmaize, cropcotton, croppeanut, cropsoybean,
+                    year2009, year2010, year2011)
 # Need only numeric variables for cv.glmnet
 # datalasso$region <- as.numeric(levels(datalasso$region))[datalasso$region]
 # datalasso$crop <- as.numeric(levels(datalasso$crop))[datalasso$crop]
 # Remove NAs
-badRows.i <- unlist(sapply(1:ncol(datalasso), function(x) which(is.na(datalasso[,x])), simplify = TRUE))
-explVars <- datalasso[-badRows.i,]
+goodRows <- datalasso %>% complete.cases() %>% which()
+explVars <- datalasso[goodRows,]
 
-# log transform mant and mgeo as they're highly skewed
-explVars$lnmgeo <- log(explVars$mgeo + 1)
-explVars$lnmant <- log(explVars$mant + 1)
-
-# Make matrix of standardized covariates
-# Standardize continuous covariates
-ccovars <- c("lnlambda", "gv", "pa", "ne", "mgeo", "mant", 
-             "pmaize", "pcot", "ppea", "psoy", "pcrop",
-             "mdistcorn", "mdistcot", "mdistpea", "mdistsoy", "mdistall",
-             "lnmgeo", "lnmant")
-ccovars.i <- as.numeric(sapply(ccovars, function(x) which(names(explVars) == x), simplify = TRUE))
-# Replace covariates with standardized form
-for(i in ccovars.i){
-  var.i <- names(explVars)[i]
-  stdvar.i <- standardize(explVars[,var.i])
-  explVars[,var.i] <- stdvar.i
-}
+# Don't need to standardize before hand, just use glmnet's standardize option
+# # Make matrix of standardized covariates
+# # Standardize continuous covariates
+# ccovars <- c("lnlambda", "gv", "pa", "ne", "mgeo", "mant", 
+#              "pmaize", "pcot", "ppea", "psoy", "pcrop",
+#              "mdistcorn", "mdistcot", "mdistpea", "mdistsoy", "mdistall",
+#              "lnmgeo", "lnmant")
+# ccovars.i <- as.numeric(sapply(ccovars, function(x) which(names(explVars) == x), simplify = TRUE))
+# # Replace covariates with standardized form
+# for(i in ccovars.i){
+#   var.i <- names(explVars)[i]
+#   stdvar.i <- standardize(explVars[,var.i])
+#   explVars[,var.i] <- stdvar.i
+# }
 
 
 # # Set of histograms for standardized covariates
@@ -114,185 +129,44 @@ for(i in ccovars.i){
 #   dev.off()
 # }
 
-
+explVars$ndist100m_all <- factor2numeric(explVars$ndist100m_all)
+explVars$ndist500all <- factor2numeric(explVars$ndist500all)
+str(explVars)
 
 ######################################################################################
 #### Elastic Net LASSO for stink bug lambda estimates
 print("Stink Bug Lambda")
-sb <- ElasticNetFunction(y = "lnlambda", times = 2000,
-                         data = explVars[,-which(names(explVars) == c("lnmgeo", "lnmant"))],
-                         alphaValues = seq(0.8,1,by=0.01))
-rm(xlasso)
-rm(ylasso)
+
+ti <- Sys.time()
+sbcv <- encv(y = "lnlambda", times = 2000,
+             data = explVars,
+             alphaValues = seq(0.9, 1, by = 0.02))
+saveRDS(sbcv, file = "output/lnlambda/stink_bug_lnlambda_cross-validation_output.rds")
+tf <- Sys.time()
+
+# Time took for cross-validation 
+tf-ti
 
 
-######################################################################################
-#### LASSO for Geocoris and fire ant densities
-#### remove natural enemy densities as is likely correlated with these variables
-print("Geocoris density")
+sben <- ElasticNetFunction(y = "lnlambda", data = explVars, 
+                           alphaBest = sbcv$alphaBest, 
+                           lambdas = sbcv$lambdas)
+saveRDS(sben, file = "output/lnlambda/stink_bug_lnlambda_elastic_net_output.rds")
 
-geoVars <- select(explVars, -mgeo, -ne, -lnmant)
+sben$coefMeans
 
-#### Cross-validation for geocoris
-geocorisCV <- encv(y = "lnmgeo", times = 2000, 
-                 data = geoVars, 
-                 alphaValues = seq(0.90,1,by=0.01))
-rm(xlasso)
-rm(ylasso)
+sbcv <- readRDS("output/lnlambda/stink_bug_lnlambda_cross-validation_output.rds")
+sben <- readRDS("output/lnlambda/stink_bug_lnlambda_elastic_net_output.rds")
 
-saveRDS(geocorisCV, file = "output/lnmgeo/geocoris_cross-validation_output.rds")
+#### LASSO significance test with lars and covTest
 
+xsb <- sben$xlasso
+ysb <- sben$ylasso
 
-#### Elasitc Net results and residuals for geocoris
-geocorisEN <- ElasticNetFunction(y = "lnmgeo", data = geoVars, 
-                                 alphaBest = geocorisCV$alphaBest, 
-                                 lambdas = geocorisCV$lambdas)
-saveRDS(geocorisEN, file = "output/lnmgeo/geocoris_elastic_net_output.rds")
+sbTest <- larsLASSOFunction(y = ysb, x = xsb)
 
-explVars$geoResiduals <- geocorisEN$residMeans$mean
-explVars$geoResidualsSD <- geocorisEN$residMeans$sd
-write.csv(explVars, file = "output/lnmgeo/lambda_data_with_residuals.csv", row.names = FALSE)
+# Combine all results, from glmnet and lars
+sbResults <- full_join(sben$coefMeans, sbTest, by = "param")
+write.csv(sbResults, file = "output/stink_bug_lambda_lasso_results.csv", row.names = FALSE)
 
-# Checking the residuals
-geoResiduals <- geocorisEN$residMeans$mean
-geoPredict <- rowMeans(geocorisEN$enPredict)
-plot(geoPredict, geoResiduals)
-
-plot(ylasso, geoPredict, xlim = c(-2,5), ylim = c(-2,5))
-abline(a = 0, b =1)
-
-
-######################################################################################
-#### Elastic Net LASSO for stink bug lambda estimates
-print("Fire ant density")
-
-antVars <- select(explVars, -lnmgeo, -ne, -mant)
-
-rm(xlasso)
-rm(ylasso)
-
-#### Cross-validation for fire ant density
-antCV <- encv(y = "lnmant", times = 2000, 
-              data = antVars, 
-              alphaValues = seq(0.8,1,by=0.01))
-
-saveRDS(antCV, file = "output/lnmant/ant_cross-validation_output.rds")
-
-
-#### Elasitc Net results and residuals for fire ant density
-antEN <- ElasticNetFunction(y = "lnmant", data = antVars, 
-                                 alphaBest = antCV$alphaBest, 
-                                 lambdas = antCV$lambdas)
-saveRDS(antEN, file = "output/lnmant/ant_elastic_net_output.rds")
-
-
-
-#########################################################################################
-#### Analyses of natural enemy densities and distance from field edges
-#########################################################################################
-
-nedata <- read.csv("data/NE_all_year.csv", header = TRUE)
-
-# Make region a 0/1 binary variable
-nedata$region <- nedata$region - 1
-
-# Crop factor codes
-nedata$crop <- factor(ifelse(nedata$crop == 1, "maize", 
-                             ifelse(nedata$crop == 2, "cotton",
-                                    ifelse(nedata$crop == 3, "peanut", "soybean"))))
-# Change factor order to maize, cotton, peanut, soybean.
-# Maize will be base level when using treatment contrasts
-nedata$crop <- factor(nedata$crop, levels(nedata$crop)[c(2,1,3,4)]) 
-levels(nedata$crop)
-# Create binary dummy variables for each crop factor level
-for(i in levels(nedata$crop)){
-  crop.i <- i
-  cropname.i <- paste("crop", crop.i, sep = "")
-  nedata[,cropname.i] <- ifelse(nedata$crop == crop.i, 1, 0)
-}
-
-# Make year a factor and create binary dummy variables for each year
-nedata$year <- factor(nedata$year)
-levels(nedata$year)
-for(i in levels(nedata$year)){
-  year.i <- i
-  yearname.i <- paste("year", year.i, sep = "")
-  nedata[,yearname.i] <- ifelse(nedata$year == year.i, 1, 0)
-}
-
-str(nedata)
-
-##########################################################################################
-#### Variable selection using LASSO
-# For predictor variables, I'm including year and crop as binary dummy variables 
-# Preparing data
-datalasso <- nedata[,c("region","geo", "ant", "dedge",
-                       "cropmaize", "cropcotton", "croppeanut", "cropsoybean",
-                       "year2009", "year2010", "year2011")]
-# Need only numeric variables for cv.glmnet
-# datalasso$region <- as.numeric(levels(datalasso$region))[datalasso$region]
-# datalasso$crop <- as.numeric(levels(datalasso$crop))[datalasso$crop]
-# Remove NAs
-badRows.i <- unlist(sapply(1:ncol(datalasso), function(x) which(is.na(datalasso[,x])), simplify = TRUE))
-explVars <- datalasso[-badRows.i,]
-
-# log transform mant and mgeo as they're highly skewed
-explVars$lngeo_edge <- log(explVars$geo + 1)
-explVars$lnant_edge <- log(explVars$ant + 1)
-
-# Make matrix of standardized covariates
-# Standardize continuous covariates; only dedge needs to standardized
-explVars$dedge <- standardize(explVars$dedge)
-
-
-
-#############################################################################################
-#### Elastic Net for geocoris
-
-geoVars <- dplyr::select(explVars, -geo, -ant, -lnant_edge)
-
-#### Cross-validation for geocoris
-geocorisCV <- encv(y = "lngeo_edge", times = 200, 
-                   data = geoVars, 
-                   alphaValues = seq(0,1,by=0.1))
-rm(xlasso)
-rm(ylasso)
-
-saveRDS(geocorisCV, file = "output/lngeo_edge/geocoris_edge_cross-validation_output.rds")
-
-
-#### Elasitc Net results and residuals for geocoris
-geocorisEN <- ElasticNetFunction(y = "lngeo_edge", data = geoVars, 
-                                 alphaBest = geocorisCV$alphaBest, 
-                                 lambdas = geocorisCV$lambdas)
-saveRDS(geocorisEN, file = "output/lngeo_edge/geocoris_edge_elastic_net_output.rds")
-
-explVars$geoResiduals <- geocorisEN$residMeans$mean
-explVars$geoResidualsSD <- geocorisEN$residMeans$sd
-write.csv(explVars, file = "output/lngeo_edge/lambda_data_with_residuals.csv", row.names = FALSE)
-
-
-#############################################################################################
-#### Elastic Net for fire ant densities
-
-antVars <- dplyr::select(explVars, -geo, -ant, -lngeo_edge)
-
-#### Cross-validation for ant
-antCV <- encv(y = "lnant_edge", times = 200, 
-                   data = antVars, 
-                   alphaValues = seq(0,1,by=0.1))
-rm(xlasso)
-rm(ylasso)
-
-saveRDS(antCV, file = "output/lnant_edge/ant_edge_cross-validation_output.rds")
-
-
-#### Elasitc Net results and residuals for ant
-antEN <- ElasticNetFunction(y = "lnant_edge", data = antVars, 
-                                 alphaBest = antCV$alphaBest, 
-                                 lambdas = antCV$lambdas)
-saveRDS(antEN, file = "output/lnant_edge/ant_edge_elastic_net_output.rds")
-
-explVars$antResiduals <- antEN$residMeans$mean
-explVars$antResidualsSD <- antEN$residMeans$sd
-write.csv(explVars, file = "output/lnant_edge/lambda_data_with_residuals.csv", row.names = FALSE)
+sbResults

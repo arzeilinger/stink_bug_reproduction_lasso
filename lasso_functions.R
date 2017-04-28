@@ -11,10 +11,26 @@ standardize <- function(covar){
 
 # Function to cross-validate alpha values in elastic net procedure
 lassoAlphaCV <- function(x){
-  lassoCVmin <- cv.glmnet(y = ylasso, x = xlasso, family = "gaussian", alpha = x)$lambda.min
+  lassoCVmin <- cv.glmnet(y = ylasso, x = xlasso, family = "gaussian", standardize = TRUE, alpha = x)$lambda.min
   return(c(x, lassoCVmin))
 }
 
+
+#### Function to convert factor columns to numeric columns
+factor2numeric <- function(factorx){
+  numx <- as.numeric(levels(factorx))[factorx]
+  return(numx)
+}
+
+#### Function to convert all factor variables in a data frame to numeric
+allFactor2numeric <- function(data){
+  factorNames <- data %>% Filter(f = is.factor) %>% names()
+  for(i in 1:length(factorNames)){
+    name.i <- factorNames[i]
+    data[,name.i] <- factor2numeric(data[,name.i])
+  }
+  return(data)
+}
 
 #### Function to run elastic net cross-validation (ENCV) multiple times for a given response variable
 #### To get a distribution of the best alpha and corresponding estimates of lambda
@@ -98,7 +114,10 @@ ElasticNetFunction <- function(y = "lnlambda", data = explVars, alphaBest = alph
   # Mean coefficient estimates
   coefMeans <- data.frame(param = row.names(coef(bsElasticNet)),
                           estimate = signif(rowMeans(coefResults), digits = 3),
-                          sd = signif(apply(coefResults, 1, sd), digits = 3))
+                          median = apply(coefResults, 1, median),
+                          sd = signif(apply(coefResults, 1, sd), digits = 3),
+                          ciu = signif(apply(coefResults, 1, function(x) quantile(x, 0.025)), digits = 3),
+                          cil = signif(apply(coefResults, 1, function(x) quantile(x, 0.975)), digits = 3))
   write.csv(coefMeans, file = paste(outdir,"elastic_net_mean_model_coef.csv", sep=""), row.names = FALSE)
   # Mean residuals
   residMeans <- data.frame(mean = signif(rowMeans(enResiduals), digits = 3),
