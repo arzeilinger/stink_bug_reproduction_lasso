@@ -174,7 +174,7 @@ ysb <- ndisten$ylasso
 ndistTest <- larsLASSOFunction(y = ysb, x = xsb)
 
 # Combine all results, from glmnet and lars
-sbResults <- full_join(ndisten$coefMeans, sbTest, by = "param")
+sbResults <- full_join(ndisten$coefMeans, ndistTest, by = "param")
 write.csv(sbResults, file = "output/stink_bug_lambda_ndist_lasso_results.csv", row.names = FALSE)
 
 sbResults
@@ -214,7 +214,7 @@ ysb <- fielden$ylasso
 fieldTest <- larsLASSOFunction(y = ysb, x = xsb)
 
 # Combine all results, from glmnet and lars
-sbResults <- full_join(fielden$coefMeans, sbTest, by = "param")
+sbResults <- full_join(fielden$coefMeans, fieldTest, by = "param")
 write.csv(sbResults, file = "output/stink_bug_lambda_field_lasso_results.csv", row.names = FALSE)
 
 sbResults
