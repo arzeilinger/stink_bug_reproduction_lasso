@@ -134,9 +134,9 @@ alphaBest <- cvAlphaResults[which(cvAlphaResults$lambda.1se == bestLambda), "alp
 alphaBest
 
 # Run fixedLassoInf() and get clean results using getLassoInfResults()
-sbLassoResults <- getLassoInfResults(y = ylasso, x = xlasso, alpha = alphaBest, lambda = lambdaBest)
-sbLassoResults$lassoTestResults
-
+sbLassoOutput <- getLassoInfResults(y = ylasso, x = xlasso, alpha = alphaBest, lambda = lambdaBest)
+sbResults <- sbLassoOutput$lassoTestResults[order(sbLassoOutput$lassoTestResults$coef), c("varName", "coef", "pvalue")]
+write.csv(sbResults, file = "output/selectiveInference/lnlambda/stink_bug_lasso_results.csv", row.names = FALSE)
 
 
 #####################################################################################################################
@@ -144,11 +144,20 @@ sbLassoResults$lassoTestResults
 #####################################################################################################################
 # Fit lar model
 larfit <- lar(x = xlasso, y = ylasso, normalize = FALSE)
+plot(larfit)
 sigmaEst <- estimateSigma(x = xlasso, y = ylasso, standardize = FALSE)
-
+# Estimate p-values, using AIC stopping criterion
 larTest <- larInf(larfit, alpha = 0.05, type = "aic", sigma = sigmaEst$sigmahat)
 larTest
-
+# Clean up the results and combine with covariate names
+varNames <- attr(xlasso, "dimnames")[[2]]
+larResults <- data.frame(varNames = varNames[larTest$vars],
+                         varIndex = larTest$vars,
+                         coef = coef(larfit, s = larTest$khat+1, mode = "step")[larTest$vars],
+                         pvalue = larTest$pv,
+                         cil = larTest$ci[,1],
+                         ciu = larTest$ci[,2])
+write.csv(larResults, file = "output/selectiveInference/lnlambda/stink_bug_lasso_results.csv", row.names = FALSE)
 
 
 
