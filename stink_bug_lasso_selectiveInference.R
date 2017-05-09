@@ -133,13 +133,27 @@ bestLambda <- min(cvAlphaResults$lambda.1se)
 alphaBest <- cvAlphaResults[which(cvAlphaResults$lambda.1se == bestLambda), "alpha"]
 alphaBest
 
-
+# Run fixedLassoInf() and get clean results using getLassoInfResults()
 sbLassoResults <- getLassoInfResults(y = ylasso, x = xlasso, alpha = alphaBest, lambda = lambdaBest)
 sbLassoResults$lassoTestResults
 
 
+
+#####################################################################################################################
+#### selectiveInference using lars
+#####################################################################################################################
+# Fit lar model
+larfit <- lar(x = xlasso, y = ylasso, normalize = FALSE)
+sigmaEst <- estimateSigma(x = xlasso, y = ylasso, standardize = FALSE)
+
+larTest <- larInf(larfit, alpha = 0.05, type = "aic", sigma = sigmaEst$sigmahat)
+larTest
+
+
+
+
 #### Examples from the web using fixedLassoInf()
-set.seed(43)
+#set.seed(43)
 n = 50
 p = 10
 sigma = 1
