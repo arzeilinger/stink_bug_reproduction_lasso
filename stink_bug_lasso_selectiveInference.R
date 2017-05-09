@@ -7,7 +7,7 @@ my.packages <- c("lattice", "tidyr", "ggplot2",
                  "selectiveInference", "glmnetUtils")
 lapply(my.packages, require, character.only = TRUE)
 
-source("lasso_functions.R")
+source("selectiveInference_functions.R")
 # source("functions_lars.R")
 
 #### Brown stink bug reproduction data set
@@ -114,7 +114,6 @@ xlasso <- datalasso %>% dplyr::select(., -lnlambda) %>% as.matrix()
 alphaValues <- c(seq(0, 0.9, by=0.1), seq(0.92, 1, by=0.02))
 
 sbcv <- cva.glmnet(y = ylasso, x = xlasso, alpha = alphaValues, standardize = FALSE)
-plot(sbcv)
 minlossplot(sbcv, cv.type = "1se", type = "b") # How do I interpret this?
 
 # Combine lambda.min and alpha for each model run
@@ -126,35 +125,20 @@ cvAlphaResults <- data.frame(alpha = sbcv$alpha,
 
 # plot alpha vs lambda.min
 #tiff("output/selectiveInference/lnlambda/cross-validation_alpha-lambda_plot.tif")
-  plot(x = cvAlphaResults$alpha, y = cvAlphaResults$lambda.min, type = "b")
+  plot(x = cvAlphaResults$alpha, y = cvAlphaResults$lambda.1se, type = "b")
 #dev.off()
 
-# Alpha that produces best (lowest) lambda.min
+# Alpha that produces best (lowest) lambda.1se
 bestLambda <- min(cvAlphaResults$lambda.1se)
 alphaBest <- cvAlphaResults[which(cvAlphaResults$lambda.1se == bestLambda), "alpha"]
 alphaBest
 
-# Extract glmnet object that corresponds to best alpha
-bestModel <- glmnet::glmnet(y = ylasso, x = xlasso, alpha = alphaBest, standardize = FALSE)
-plot(bestModel)
-coef(bestModel, s = bestLambda)
 
-n <- nrow(xlasso)
-betas <- coef(bestModel, s=bestLambda/n, exact = TRUE, y = ylasso, x = xlasso)[-1]
+sbLassoResults <- getLassoInfResults(y = ylasso, x = xlasso, alpha = alphaBest, lambda = lambdaBest)
+sbLassoResults$lassoTestResults
 
-sigmaEst <- estimateSigma(x = xlasso, y = ylasso, standardize = FALSE)
 
-lassoTest <- fixedLassoInf(x = xlasso, y = ylasso, beta = betas, lambda = bestLambda, alpha = 0.05, type = "partial", sigma = sigmaEst$sigmahat)
-lassoTest
-
-lassoTestResults <- data.frame(varName = names(lassoTest$vars),
-                               varIndex = as.numeric(lassoTest$vars),
-                               coef = lassoTest$coef0,
-                               pvalue = lassoTest$pv,
-                               cil = lassoTest$ci[,1],
-                               ciu = lassoTest$ci[,2])
-lassoTestResults
-
+#### Examples from the web using fixedLassoInf()
 set.seed(43)
 n = 50
 p = 10
