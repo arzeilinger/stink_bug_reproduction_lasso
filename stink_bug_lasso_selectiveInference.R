@@ -159,7 +159,17 @@ larResults <- data.frame(varNames = varNames[larTest$vars],
                          ciu = larTest$ci[,2])
 write.csv(larResults, file = "output/selectiveInference/lnlambda/stink_bug_lasso_results.csv", row.names = FALSE)
 
+# Combine LAR and Ordinary Least Squares coefficient estimates
+OLSResults <- data.frame(varIndex = as.numeric(row.names(as.data.frame(larfit$bls))),
+                         lscoef = larfit$bls)
+larOLSResults <- larResults %>% dplyr::select(., -varNames) %>% full_join(., OLSResults, by = "varIndex")
 
+# Add in all variable names
+varNamesDF <- data.frame(varIndex = as.numeric(row.names(as.data.frame(varNames))),
+                         varNames = varNames)
+larOLSResults <- full_join(varNamesDF, larOLSResults, by = "varIndex")
+larOLSResults$coef[is.na(larOLSResults$coef)] <- 0
+larOLSResults <- larOLSResults %>% dplyr::arrange(., -abs(coef))
 
 #### Examples from the web using fixedLassoInf()
 #set.seed(43)
