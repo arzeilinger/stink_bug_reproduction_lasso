@@ -2,7 +2,7 @@
 
 # Preliminaries
 rm(list = ls())
-my.packages <- c("lattice", "tidyr", "ggplot2",  
+my.packages <- c("openxlsx", "tidyr", "ggplot2",  
                  "dplyr", "glmnet", "lars", "covTest",
                  "selectiveInference", "glmnetUtils")
 lapply(my.packages, require, character.only = TRUE)
@@ -114,6 +114,7 @@ xlasso <- datalasso %>% dplyr::select(., -lnlambda) %>% as.matrix()
 alphaValues <- c(seq(0, 0.9, by=0.1), seq(0.92, 1, by=0.02))
 
 sbcv <- cva.glmnet(y = ylasso, x = xlasso, alpha = alphaValues, standardize = FALSE)
+
 minlossplot(sbcv, cv.type = "1se", type = "b") # How do I interpret this?
 
 # Combine lambda.min and alpha for each model run
@@ -143,34 +144,38 @@ write.csv(sbResults, file = "output/selectiveInference/lnlambda/stink_bug_lasso_
 #### selectiveInference using lars
 #####################################################################################################################
 # Fit lar model
-larfit <- lar(x = xlasso, y = ylasso, normalize = FALSE)
-plot(larfit)
-sigmaEst <- estimateSigma(x = xlasso, y = ylasso, standardize = FALSE)
-# Estimate p-values, using AIC stopping criterion
-larTest <- larInf(larfit, alpha = 0.05, type = "aic", sigma = sigmaEst$sigmahat)
-larTest
-# Clean up the results and combine with covariate names
-varNames <- attr(xlasso, "dimnames")[[2]]
-larResults <- data.frame(varNames = varNames[larTest$vars],
-                         varIndex = larTest$vars,
-                         coef = coef(larfit, s = larTest$khat+1, mode = "step")[larTest$vars],
-                         pvalue = larTest$pv,
-                         cil = larTest$ci[,1],
-                         ciu = larTest$ci[,2])
-write.csv(larResults, file = "output/selectiveInference/lnlambda/stink_bug_lasso_results.csv", row.names = FALSE)
+
+sblar <- fitLAR(x = xlasso, y = ylasso)
+
+write.csv(sblar$larResults, file = "output/selectiveInference/lnlambda/stink_bug_lasso_results.csv", row.names = FALSE)
 
 # Combine LAR and Ordinary Least Squares coefficient estimates
-OLSResults <- data.frame(varIndex = as.numeric(row.names(as.data.frame(larfit$bls))),
-                         lscoef = larfit$bls)
-larOLSResults <- larResults %>% dplyr::select(., -varNames) %>% full_join(., OLSResults, by = "varIndex")
+OLSResults <- data.frame(varIndex = as.numeric(row.names(as.data.frame(sblar$larfit$bls))),
+                         lscoef = sblar$larfit$bls)
+larOLSResults <- sblar$larResults %>% dplyr::select(., -varNames) %>% full_join(., OLSResults, by = "varIndex")
 
-# Add in all variable names
+# Get variable names
 varNamesDF <- data.frame(varIndex = as.numeric(row.names(as.data.frame(varNames))),
                          varNames = varNames)
+varNamesFullDF <- read.xlsx("data/lasso_full_variable_names.xlsx", sheet = "stink_bug_lambda")
+varNamesDF <- full_join(varNamesDF, varNamesFullDF, by = "varIndex")
+# Combine LAR results and variable names
 larOLSResults <- full_join(varNamesDF, larOLSResults, by = "varIndex")
 larOLSResults$coef[is.na(larOLSResults$coef)] <- 0
-larOLSResults <- larOLSResults %>% dplyr::arrange(., -abs(coef))
+#larOLSResults <- larOLSResults %>% dplyr::arrange(., -abs(coef))
+larOLSResults
 
+# Make a pretty results table
+resultsTable <- larOLSResults %>% mutate_at(., vars(coef, pvalue, cil, ciu, lscoef), funs(signif(., digits = 3))) %>% 
+  mutate(., summary = ifelse(is.na(cil), coef, paste(coef, " [", cil, ", ", ciu, "]", sep = ""))) %>%
+  dplyr::arrange(., -abs(coef)) %>%
+  dplyr::select(., varNamesFull, summary, pvalue, lscoef)
+
+write.csv(resultsTable, file = "output/selectiveInference/lnlambda/stink_bug_lasso_least-squares_results.csv", row.names = FALSE)
+
+
+
+#####################################################################################################################
 #### Examples from the web using fixedLassoInf()
 #set.seed(43)
 n = 50
